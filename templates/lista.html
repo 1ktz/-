@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h1>Estudiantes</h1>
+<form class="buscador" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Buscar por nombre o apellido...">
+  <button class="btn" type="submit">Buscar</button>
+  {% if q %}<a class="btn sec" href="{{ url_for('listar') }}">Limpiar</a>{% endif %}
+</form>
+
+{% if estudiantes %}
+<div class="tabla-wrap">
+<table>
+  <thead><tr><th>Apellido</th><th>Nombre</th><th>Email</th><th></th></tr></thead>
+  <tbody>
+  {% for e in estudiantes %}
+    <tr>
+      <td data-label="Apellido">{{ e.apellido }}</td>
+      <td data-label="Nombre">{{ e.nombre }}</td>
+      <td data-label="Email">{{ e.email }}</td>
+      <td class="acciones">
+        <a class="btn chico sec" href="{{ url_for('detalle', id=e.id) }}">Ver</a>
+        <a class="btn chico" href="{{ url_for('editar', id=e.id) }}">Editar</a>
+        <form method="post" action="{{ url_for('eliminar', id=e.id) }}"
+              onsubmit="return confirm('¿Eliminar a {{ e.nombre_completo }}?');">
+          <button class="btn chico peligro" type="submit">Eliminar</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="vacio">No hay estudiantes{{ ' que coincidan con "' ~ q ~ '"' if q }}.</p>
+{% endif %}
+{% endblock %}

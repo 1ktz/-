@@ -1,0 +1,10 @@
+Flask>=3.0
+pymongo>=4.6
+
+
+pip install -r requirements.txt
+python app.py
+
+set ADMIN_USER=admin
+set ADMIN_PASSWORD=UnaClaveAdminSegura123!
+set SECRET_KEY=una-clave-larga-y-aleatoria

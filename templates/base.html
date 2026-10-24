@@ -1,0 +1,6 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{% block titulo %}Registro de Estudiantes{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static', filename='estilos.css') }}"></head>
+<body><header class="barra"><a class="logo" href="{{ url_for('inicio') }}">🎓 Registro Escolar</a><nav>
+{% if session.get('rol') == 'admin' %}<a href="{{ url_for('panel_admin') }}">Panel admin</a><a href="{{ url_for('listar') }}">Estudiantes</a><a href="{{ url_for('nuevo') }}">+ Nuevo</a>
+{% elif session.get('rol') == 'alumno' %}<a href="{{ url_for('panel_alumno') }}">Mis notas e inasistencias</a>{% else %}<a href="{{ url_for('login') }}">Iniciar sesión</a><a href="{{ url_for('registro') }}">Registrarme</a>{% endif %}
+{% if session.get('usuario') %}<span>{{ session.get('usuario') }}</span><form method="post" action="{{ url_for('salir') }}" style="display:inline"><button class="btn sec" type="submit">Salir</button></form>{% endif %}</nav></header><main class="contenedor">{% with mensajes = get_flashed_messages(with_categories=true) %}{% for cat, msg in mensajes %}<div class="aviso {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}{% block contenido %}{% endblock %}</main></body></html>

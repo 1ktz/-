@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block contenido %}
+<section class="tarjeta">
+  <h1>{{ e.nombre_completo }}</h1>
+  <p><strong>Nombre:</strong> {{ e.nombre }}</p>
+  <p><strong>Apellido:</strong> {{ e.apellido }}</p>
+  <p><strong>Email:</strong> <a href="mailto:{{ e.email }}">{{ e.email }}</a></p>
+  <div class="acciones">
+    <a class="btn" href="{{ url_for('editar', id=e.id) }}">Editar</a>
+    <form method="post" action="{{ url_for('eliminar', id=e.id) }}"
+          onsubmit="return confirm('¿Eliminar a {{ e.nombre_completo }}?');">
+      <button class="btn peligro" type="submit">Eliminar</button>
+    </form>
+    <a class="btn sec" href="{{ url_for('listar') }}">Volver</a>
+  </div>
+</section>
+{% endblock %}
