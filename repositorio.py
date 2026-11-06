@@ -1,29 +1,46 @@
 """
-repositorio.py - Acceso a datos (capa que conecta con MongoDB)
+repositorio.py - Acceso a datos (capa que conecta con MongoDB Atlas)
 
-CONTRATO que debe cumplir cualquier repositorio (lo usa ListaEstudiantes):
+La conexión se lee del secret de Codespaces MONGODB (variable de entorno).
+Los usuarios iniciales se crean desde los secrets:
+    ADMIN_USUARIO, ADMIN_PASSWORD, USUARIO_NOMBRE, USUARIO_PASSWORD
+
+CONTRATO que debe cumplir cualquier repositorio de estudiantes (lo usa ListaEstudiantes):
     guardar(estudiante)   -> id (str) del nuevo documento
     cargar(texto=None)    -> lista de Estudiante (filtrada por nombre/apellido si hay texto)
     obtener(id)           -> Estudiante o None
     actualizar(estudiante)-> None
     eliminar(id)          -> bool
 
-Colección: estudiantes   Documento: {_id, nombre, apellido, email}
-Quien diseñe la BD solo tiene que ajustar esta clase si cambia el modelo.
+Colecciones:
+    estudiantes -> {_id, nombre, apellido, email}
+    usuarios    -> {_id, usuario, password (hash), rol}
 """
+import os
 import re
 import uuid
 
 from modelos import Estudiante
 
+NOMBRE_BD = "registro_alumnos"
+
+
+def _obtener_uri():
+    """Lee la cadena de conexión desde el secret MONGODB (o usa localhost)."""
+    return os.environ.get("MONGODB", "mongodb://localhost:27017")
+
+
+def _obtener_bd(uri=None, nombre_bd=NOMBRE_BD):
+    from pymongo import MongoClient  # import aquí para poder correr sin pymongo
+    cliente = MongoClient(uri or _obtener_uri(), serverSelectionTimeoutMS=5000)
+    return cliente[nombre_bd]
+
 
 class RepositorioEstudiantes:
-    """Repositorio real: guarda en MongoDB usando PyMongo."""
+    """Repositorio real: guarda estudiantes en MongoDB usando PyMongo."""
 
-    def __init__(self, uri="mongodb://localhost:27017", nombre_bd="registro_alumnos"):
-        from pymongo import MongoClient  # import aquí para poder correr sin pymongo
-        self.__cliente = MongoClient(uri, serverSelectionTimeoutMS=3000)
-        self.__coleccion = self.__cliente[nombre_bd]["estudiantes"]
+    def __init__(self, uri=None, nombre_bd=NOMBRE_BD):
+        self.__coleccion = _obtener_bd(uri, nombre_bd)["estudiantes"]
 
     @staticmethod
     def __a_object_id(id):
@@ -58,6 +75,37 @@ class RepositorioEstudiantes:
     def eliminar(self, id):
         oid = self.__a_object_id(id)
         return bool(oid) and self.__coleccion.delete_one({"_id": oid}).deleted_count == 1
+
+
+class RepositorioUsuarios:
+    """Usuarios del sistema (admin / usuario). Las contraseñas se guardan hasheadas."""
+
+    def __init__(self, uri=None, nombre_bd=NOMBRE_BD):
+        self.__coleccion = _obtener_bd(uri, nombre_bd)["usuarios"]
+        self.__coleccion.create_index("usuario", unique=True)
+
+    def crear_iniciales(self):
+        """Crea el admin y el usuario común desde los secrets, si todavía no existen."""
+        from werkzeug.security import generate_password_hash
+        iniciales = [
+            (os.environ.get("ADMIN_USUARIO"), os.environ.get("ADMIN_PASSWORD"), "admin"),
+            (os.environ.get("USUARIO_NOMBRE"), os.environ.get("USUARIO_PASSWORD"), "usuario"),
+        ]
+        for nombre, clave, rol in iniciales:
+            if nombre and clave and not self.__coleccion.find_one({"usuario": nombre}):
+                self.__coleccion.insert_one({
+                    "usuario": nombre,
+                    "password": generate_password_hash(clave),
+                    "rol": rol,
+                })
+
+    def verificar(self, usuario, clave):
+        """Devuelve {'usuario', 'rol'} si las credenciales son correctas, si no None."""
+        from werkzeug.security import check_password_hash
+        doc = self.__coleccion.find_one({"usuario": usuario})
+        if doc and check_password_hash(doc["password"], clave):
+            return {"usuario": doc["usuario"], "rol": doc["rol"]}
+        return None
 
 
 class RepositorioMemoria:
