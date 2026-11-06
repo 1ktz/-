@@ -8,4 +8,4 @@ python app.py
 set ADMIN_USER=admin
 set ADMIN_PASSWORD=UnaClaveAdminSegura123!
 set SECRET_KEY=una-clave-larga-y-aleatoria
-mongodb(registro_app=UnaContraseñaNuevaFuerte)
+mongodb(MONGODB=CONTRASEÑACOMPLICADA123?)
