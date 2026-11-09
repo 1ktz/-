@@ -1,9 +1,12 @@
 """Sistema escolar Flask: autenticación y permisos por rol."""
 import os
+import re
+import html
 from functools import wraps
 from datetime import datetime
 from flask import Flask, flash, redirect, render_template, request, url_for, session, abort
 from werkzeug.security import generate_password_hash, check_password_hash
+from pymongo.errors import PyMongoError
 from modelos import ListaEstudiantes
 from repositorio import RepositorioEstudiantes, RepositorioMemoria
 
@@ -15,18 +18,40 @@ if USAR_MEMORIA:
     usuarios, notas, inasistencias = {}, {}, {}
 else:
     from pymongo import MongoClient
-    cliente = MongoClient(os.environ.get('MONGO_URI', 'mongodb://localhost:27017'), serverSelectionTimeoutMS=3000)
-    bd = cliente[os.environ.get('MONGO_BD', 'registro_alumnos')]
-    repositorio = RepositorioEstudiantes(os.environ.get('MONGO_URI', 'mongodb://localhost:27017'), os.environ.get('MONGO_BD', 'registro_alumnos'))
+    mongo_uri = os.environ.get('MONGO_URI', '').strip()
+    mongo_bd = os.environ.get('MONGO_BD', 'registro_alumnos').strip() or 'registro_alumnos'
+    if not mongo_uri:
+        raise RuntimeError('Falta MONGO_URI. Configurá la URI de MongoDB Atlas o usá USAR_MEMORIA=1 para pruebas.')
+    if not mongo_uri.startswith(('mongodb://', 'mongodb+srv://')):
+        raise RuntimeError('MONGO_URI debe comenzar con mongodb:// o mongodb+srv://.')
+
+    cliente = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    try:
+        cliente.admin.command('ping')
+    except Exception as error:
+        raise RuntimeError('No se pudo conectar con MongoDB. Revisá MONGO_URI, credenciales y Network Access de Atlas.') from error
+
+    bd = cliente[mongo_bd]
+    repositorio = RepositorioEstudiantes(mongo_uri, mongo_bd)
     usuarios, notas, inasistencias = bd['usuarios'], bd['notas'], bd['inasistencias']
+    usuarios.create_index('nombre_usuario', unique=True)
+    usuarios.create_index('email', unique=True)
+    notas.create_index('clave', unique=True)
+    inasistencias.create_index('clave', unique=True)
 lista = ListaEstudiantes(repositorio)
 MATERIAS = ['Matemáticas', 'Lengua', 'Inglés', 'Química', 'Informática', 'Física', 'Historia']
 
+def texto_seguro(valor):
+    """Limpia texto ingresado por el usuario antes de persistirlo o buscarlo."""
+    return html.escape((valor or '').strip(), quote=True)
+
+
 # Crear administrador inicial una sola vez. Cambiar estas variables antes de publicar.
 def buscar_usuario(nombre):
+    nombre = texto_seguro(nombre)
     if USAR_MEMORIA:
         return next((u for u in usuarios.values() if u['nombre_usuario'].casefold() == nombre.casefold()), None)
-    return usuarios.find_one({'nombre_usuario': nombre}) or usuarios.find_one({'nombre_usuario': {'$regex': '^' + __import__('re').escape(nombre) + '$', '$options': 'i'}})
+    return usuarios.find_one({'nombre_usuario': nombre}) or usuarios.find_one({'nombre_usuario': {'$regex': '^' + re.escape(nombre) + '$', '$options': 'i'}})
 
 def guardar_usuario(doc):
     if USAR_MEMORIA:
@@ -86,6 +111,13 @@ def error_general(e):
     app.logger.exception(e)
     return render_template('error.html', mensaje='No se pudo completar la operación. Verificá que MongoDB esté funcionando.'), 500
 
+
+@app.errorhandler(PyMongoError)
+def error_mongodb(e):
+    """Registra el detalle en el servidor, pero nunca lo expone al navegador."""
+    app.logger.exception('[SEGURIDAD] Error de MongoDB: %s', e)
+    return render_template('error.html', mensaje='No se pudo completar la operación. Intentá nuevamente más tarde.'), 500
+
 @app.route('/')
 def inicio():
     if 'usuario' in session:
@@ -95,9 +127,9 @@ def inicio():
 @app.route('/registro', methods=['GET', 'POST'])
 def registro():
     if request.method == 'POST':
-        nombre = request.form.get('nombre', '').strip()
-        apellido = request.form.get('apellido', '').strip()
-        email = request.form.get('email', '').strip().lower()
+        nombre = texto_seguro(request.form.get('nombre'))
+        apellido = texto_seguro(request.form.get('apellido'))
+        email = texto_seguro(request.form.get('email')).lower()
         password = request.form.get('password', '')
         if len(nombre) < 2 or len(apellido) < 2 or '@' not in email or len(password) < 8:
             flash('Completá todos los campos. La contraseña debe tener al menos 8 caracteres.', 'error')
@@ -116,7 +148,7 @@ def registro():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        nombre = request.form.get('nombre_usuario', '').strip()
+        nombre = texto_seguro(request.form.get('nombre_usuario'))
         password = request.form.get('password', '')
         u = buscar_usuario(nombre)
         if u and check_password_hash(u['password_hash'], password):
@@ -146,7 +178,7 @@ def panel_admin():
 @app.route('/admin/notas', methods=['POST'])
 @admin_requerido
 def admin_nota():
-    alumno = request.form.get('alumno', '').strip(); materia = request.form.get('materia', ''); valor = request.form.get('valor', '').strip()
+    alumno = texto_seguro(request.form.get('alumno')); materia = texto_seguro(request.form.get('materia')); valor = request.form.get('valor', '').strip()
     if not buscar_usuario(alumno) or materia not in MATERIAS:
         flash('Alumno o materia inválidos.', 'error')
     else:
@@ -167,7 +199,7 @@ def admin_borrar_nota(clave):
 @app.route('/admin/inasistencias', methods=['POST'])
 @admin_requerido
 def admin_inasistencia():
-    alumno = request.form.get('alumno', '').strip(); fecha = request.form.get('fecha', '').strip(); cantidad = request.form.get('cantidad', '1').strip(); motivo = request.form.get('motivo', '').strip()
+    alumno = texto_seguro(request.form.get('alumno')); fecha = texto_seguro(request.form.get('fecha')); cantidad = request.form.get('cantidad', '1').strip(); motivo = texto_seguro(request.form.get('motivo'))
     if not buscar_usuario(alumno) or not fecha:
         flash('Seleccioná un alumno y una fecha válida.', 'error')
     else:
@@ -188,12 +220,12 @@ def admin_borrar_inasistencia(clave):
 # Gestión de estudiantes existente: ahora exclusiva del administrador.
 def _datos_form():
     f = request.form
-    return f.get('nombre', ''), f.get('apellido', ''), f.get('email', '')
+    return texto_seguro(f.get('nombre')), texto_seguro(f.get('apellido')), texto_seguro(f.get('email'))
 
 @app.route('/estudiantes')
 @admin_requerido
 def listar():
-    q = request.args.get('q', '')
+    q = texto_seguro(request.args.get('q'))
     return render_template('lista.html', estudiantes=lista.buscar_por_nombre(q), q=q)
 
 @app.route('/estudiantes/nuevo', methods=['GET', 'POST'])
