@@ -18,7 +18,7 @@ if USAR_MEMORIA:
     usuarios, notas, inasistencias = {}, {}, {}
 else:
     from pymongo import MongoClient
-    mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://MONGODB:CONTRASEÑACOMPLICADA123@registroalumnos.ytcggow.mongodb.net/').strip()
+    mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://MONGODB:CONTRASENACOMPLICADA123@registroalumnos.ytcggow.mongodb.net/').strip()
     mongo_bd = os.environ.get('MONGO_BD', 'registro_alumnos').strip() or 'registro_alumnos'
     if not mongo_uri:
         raise 'Falta MONGO_URI. Configurá la URI de MongoDB Atlas o usá USAR_MEMORIA=1 para pruebas.')
