@@ -18,12 +18,12 @@ if USAR_MEMORIA:
     usuarios, notas, inasistencias = {}, {}, {}
 else:
     from pymongo import MongoClient
-    mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://MONGODB:CONTRASEÑACOMPLICADA123?@registroalumnos.ytcggow.mongodb.net/').strip()
+    mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://MONGODB:CONTRASEÑACOMPLICADA123@registroalumnos.ytcggow.mongodb.net/').strip()
     mongo_bd = os.environ.get('MONGO_BD', 'registro_alumnos').strip() or 'registro_alumnos'
     if not mongo_uri:
-        raise RuntimeError('Falta MONGO_URI. Configurá la URI de MongoDB Atlas o usá USAR_MEMORIA=1 para pruebas.')
-    if not mongo_uri.startswith(('mongodb+srv://MONGODB:CONTRASEÑACOMPLICADA123?@registroalumnos.ytcggow.mongodb.net/')):
-        raise RuntimeError('mongodb+srv://MONGODB:CONTRASEÑACOMPLICADA123?@registroalumnos.ytcggow.mongodb.net/')
+        raise 'Falta MONGO_URI. Configurá la URI de MongoDB Atlas o usá USAR_MEMORIA=1 para pruebas.')
+    if not mongo_uri.startswith(('mongodb://', 'mongodb+srv://')):
+        raise RuntimeError('MONGO_URI debe comenzar con mongodb:// o mongodb+srv://.')
 
     cliente = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
     try:
