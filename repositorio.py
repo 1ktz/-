@@ -76,4 +76,3 @@ class RepositorioEstudiantes:
         oid = self.__a_object_id(id)
         return bool(oid) and self.__coleccion.delete_one({"_id": oid}).deleted_count == 1
 
-
