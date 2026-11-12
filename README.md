@@ -18,7 +18,7 @@
 
 ## 1. Resumen ejecutivo
 
-El proyecto implementa un sitio web para administrar un registro de estudiantes. Permite crear fichas con nombre, apellido y correo electrónico; consultar el listado y el detalle individual; buscar por nombre o apellido; editar los datos y eliminar registros. La aplicación usa Flask para atender las solicitudes web, clases propias para representar y validar los datos, y una capa repositorio para separar la lógica del mecanismo de almacenamiento. En el uso normal, los datos se guardan en MongoDB. Existe además un repositorio temporal en memoria pensado para probar la interfaz sin una base de datos.
+El proyecto implementa un sitio web para administrar un registro de estudiantes. Permite crear fichas con nombre, apellido y correo electrónico; consultar el listado y el detalle individual; buscar por nombre o apellido; editar los datos y eliminar registros. La aplicación usa Flask para atender las solicitudes web, clases propias para representar y validar los datos, y una capa repositorio para separar la lógica del almacenamiento. Todos los datos de la aplicación se guardan en MongoDB.
 
 La estructura es modular y se distinguen las capas de presentación, aplicación, dominio y persistencia. La información de cada estudiante se limita a tres campos personales, además de un identificador generado por el almacenamiento. El código valida los campos en el servidor y también declara restricciones básicas en el formulario HTML.
 
@@ -30,7 +30,7 @@ El archivo recibido es un ZIP que contiene una carpeta `registro_estudiantes/`. 
 |---|---|---|
 | `app.py` | Python | Inicializa Flask, configura el repositorio y define las rutas HTTP y sus respuestas. |
 | `modelos.py` | Python | Define las entidades `Estudiante` y `ListaEstudiantes`, con validación y reglas del negocio. |
-| `repositorio.py` | Python | Implementa almacenamiento MongoDB y alternativa temporal en memoria. |
+| `repositorio.py` | Python | Implementa el almacenamiento de estudiantes en MongoDB. |
 | `requirements.txt` | Dependencias | Declara Flask y PyMongo como paquetes requeridos. |
 | `INSTALACION.md` | Documentación | Explica los requisitos, instalación, ejecución y modo de prueba. |
 | `static/estilos.css` | CSS | Define colores, distribución, componentes y adaptación a pantallas pequeñas. |
@@ -54,7 +54,7 @@ Las carpetas `static/` y `templates/` son directorios contenedores, no programas
 
 ## 4. Arquitectura y recorrido de datos
 
-La interfaz del navegador envía una solicitud a una ruta Flask de `app.py`. Para una operación de negocio, Flask llama a `ListaEstudiantes` en `modelos.py`. Esta capa construye o recupera objetos `Estudiante`, ejecuta validaciones y delega la persistencia al repositorio. El repositorio usa PyMongo para consultar MongoDB o un diccionario Python si se activó el modo memoria. El resultado vuelve a Flask, que renderiza una plantilla Jinja2; el CSS de `static/estilos.css` controla su aspecto.
+La interfaz del navegador envía una solicitud a una ruta Flask de `app.py`. Para una operación de negocio, Flask llama a `ListaEstudiantes` en `modelos.py`. Esta capa construye o recupera objetos `Estudiante`, ejecuta validaciones y delega la persistencia al repositorio. El repositorio usa PyMongo para consultar y modificar MongoDB. El resultado vuelve a Flask, que renderiza una plantilla Jinja2; el CSS de `static/estilos.css` controla su aspecto.
 
 **Capas:** presentación (HTML/Jinja2 y CSS) → aplicación/controlador (`app.py`) → dominio y reglas (`modelos.py`) → almacenamiento (`repositorio.py`) → MongoDB.
 
@@ -64,9 +64,9 @@ La separación mediante contrato de repositorio permite cambiar o sustituir el a
 
 ### 5.1 `app.py` — aplicación web y controladores
 
-Importa Flask y funciones para mostrar plantillas, leer formularios, redirigir y emitir mensajes temporales. Importa `ListaEstudiantes` y los dos repositorios. Crea la aplicación Flask y configura `secret_key`, necesaria para los mensajes flash. La clave usa una cadena por defecto que el propio código indica que debe cambiarse en producción.
+Importa Flask y funciones para mostrar plantillas, leer formularios, redirigir y emitir mensajes temporales. Importa `ListaEstudiantes` y el repositorio MongoDB. Crea la aplicación Flask y configura `secret_key`, necesaria para los mensajes flash. La clave usa una cadena por defecto que el propio código indica que debe cambiarse en producción.
 
-Selecciona `RepositorioMemoria` si la variable de entorno `USAR_MEMORIA` vale `1`; en caso contrario instancia `RepositorioEstudiantes`, usando `MONGO_URI` y `MONGO_BD`, con valores predeterminados de Mongo local y `registro_alumnos`. Después crea el servicio `lista`, que será utilizado por las rutas.
+Conecta obligatoriamente con MongoDB usando `MONGO_URI` y `MONGO_BD`; si la conexión falla, la aplicación no inicia. Las colecciones `estudiantes`, `usuarios`, `notas` e `inasistencias` son la fuente de los datos. No se crean cuentas ni datos de ejemplo automáticamente. Después crea el servicio `lista`, que será utilizado por las rutas.
 
 La función auxiliar `_datos_form()` extrae `nombre`, `apellido` y `email` del formulario POST. El manejador global `error_general()` muestra errores HTTP con su descripción y código; para errores no HTTP registra la excepción en el log y presenta un mensaje genérico indicando que podría fallar MongoDB. La aplicación devuelve estado 500 en este caso.
 
@@ -95,15 +95,13 @@ Documenta un contrato común: `guardar`, `cargar`, `obtener`, `actualizar` y `el
 
 **`RepositorioEstudiantes`:** conecta con MongoDB utilizando `MongoClient` y PyMongo; usa timeout de selección de servidor de 3 segundos. Accede a la colección `estudiantes`. `guardar()` inserta el diccionario y devuelve el ObjectId como texto. `cargar()` recupera documentos, opcionalmente aplicando una expresión regular escapada (`re.escape`) en nombre o apellido, sin distinguir mayúsculas, y ordena por apellido y nombre. `obtener()` convierte el identificador textual a `ObjectId` de forma segura y devuelve la entidad si existe. `actualizar()` usa `$set` para modificar los campos sin reemplazar todo el documento. `eliminar()` ejecuta el borrado y retorna verdadero solo si se eliminó un documento. Un ID mal formado se convierte en ausencia de resultado y no provoca un error de conversión.
 
-**`RepositorioMemoria`:** almacena diccionarios dentro de un diccionario privado, asignando identificadores UUID. Implementa el mismo contrato: agrega, lista/filtra/ordena, recupera, actualiza y elimina. Su contenido vive únicamente en memoria del proceso, por eso se pierde al cerrar o reiniciar la aplicación. Es útil para mostrar y probar la interfaz sin MongoDB, pero no es almacenamiento permanente.
-
 ### 5.4 `requirements.txt` — dependencias
 
-Declara `Flask>=3.0` para servidor y plantillas, y `pymongo>=4.6` para comunicación con MongoDB. La versión de Python indicada en la guía de instalación es 3.10 o superior. Las dependencias se instalan con `pip install -r requirements.txt`.
+Declara `Flask>=3.0` para servidor y plantillas, `pymongo>=4.6` para comunicación con MongoDB y `python-dotenv>=1.0` para cargar la configuración local desde `.env`. La versión de Python indicada en la guía de instalación es 3.10 o superior. Las dependencias se instalan con `pip install -r requirements.txt`.
 
 ### 5.5 `INSTALACION.md` — instrucciones de puesta en marcha
 
-Pide Python 3.10+ y MongoDB (local, Compass/Atlas como opciones citadas). Indica crear y activar un entorno virtual, instalar dependencias y ejecutar `python app.py`. Permite ajustar la conexión con `MONGO_URI` y la base con `MONGO_BD`. Para modo sin MongoDB se debe definir `USAR_MEMORIA=1` (en Windows, `set`; en Linux/macOS, `export`) antes de ejecutar. Finalmente indica abrir `http://127.0.0.1:5000`.
+Pide Python 3.10+ y MongoDB (local o Atlas). Indica crear y activar un entorno virtual, instalar dependencias y configurar `.env` o las variables `MONGO_URI` y `MONGO_BD`. La aplicación requiere MongoDB para iniciar; finalmente se abre `http://127.0.0.1:5000`.
 
 ### 5.6 `static/estilos.css` — presentación visual
 
@@ -128,15 +126,15 @@ La búsqueda solo contempla nombre y apellido; no busca por email. La coincidenc
 
 ## 8. Ejecución resumida
 
-1. Instalar Python 3.10 o superior y MongoDB, salvo que se vaya a probar en memoria.
+1. Instalar Python 3.10 o superior y disponer de una instancia de MongoDB.
 2. Crear/activar un entorno virtual e instalar `requirements.txt`.
-3. Configurar, si hace falta, `MONGO_URI` y `MONGO_BD`, o exportar `USAR_MEMORIA=1` para la prueba temporal.
+3. Configurar `MONGO_URI` y `MONGO_BD` en `.env` o como variables de entorno. Para iniciar sesión como administrador, asignar `rol: "admin"` a un usuario de la colección `usuarios`.
 4. Ejecutar `python app.py` y navegar a `http://127.0.0.1:5000`.
 5. Para un uso real, configurar una clave secreta segura y no ejecutar el servidor con modo debug expuesto.
 
 ## 9. Conclusión
 
-El paquete contiene una aplicación web funcional de registro estudiantil con operaciones CRUD completas: crear, leer, actualizar y eliminar. Su principal fortaleza académica es la separación entre interfaz, reglas de dominio y persistencia, además del uso de encapsulación, propiedades, validación y un repositorio intercambiable. Para una demostración local puede funcionar con MongoDB o con almacenamiento en memoria. Antes de desplegarla para uso real, debería configurarse seguridad básica, pruebas automatizadas, protección CSRF, clave secreta segura y controles acordes a la privacidad de la información.
+El paquete contiene una aplicación web funcional de registro estudiantil con operaciones CRUD completas: crear, leer, actualizar y eliminar. Su principal fortaleza académica es la separación entre interfaz, reglas de dominio y persistencia, además del uso de encapsulación, propiedades y validación. Los datos se consultan y guardan en MongoDB. Antes de desplegarla para uso real, debería configurarse seguridad básica, pruebas automatizadas, protección CSRF, clave secreta segura y controles acordes a la privacidad de la información.
 
 ## Glosario breve
 

@@ -4,40 +4,55 @@ import re
 import html
 from functools import wraps
 from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, url_for, session, abort
 from werkzeug.security import generate_password_hash, check_password_hash
-from pymongo.errors import PyMongoError
+from pymongo.errors import InvalidURI, OperationFailure, PyMongoError
 from modelos import ListaEstudiantes
-from repositorio import RepositorioEstudiantes, RepositorioMemoria
+from repositorio import RepositorioEstudiantes
+
+load_dotenv(Path(__file__).resolve().with_name('.env'))
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-secreta-antes-de-publicar')
-USAR_MEMORIA = os.environ.get('USAR_MEMORIA') == '1'
-if USAR_MEMORIA:
-    repositorio = RepositorioMemoria()
-    usuarios, notas, inasistencias = {}, {}, {}
-else:
-    from pymongo import MongoClient
-    mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://MONGODB:CONTRASENACOMPLICADA123@registroalumnos.ytcggow.mongodb.net/').strip()
-    mongo_bd = os.environ.get('MONGO_BD', 'registro_alumnos').strip() or 'registro_alumnos'
-    if not mongo_uri:
-        raise 'Falta MONGO_URI. Configurá la URI de MongoDB Atlas o usá USAR_MEMORIA=1 para pruebas.')
-    if not mongo_uri.startswith(('mongodb://', 'mongodb+srv://')):
-        raise RuntimeError('MONGO_URI debe comenzar con mongodb:// o mongodb+srv://.')
+from pymongo import MongoClient
 
-    cliente = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    try:
-        cliente.admin.command('ping')
-    except Exception as error:
-        raise RuntimeError('No se pudo conectar con MongoDB. Revisá MONGO_URI, credenciales y Network Access de Atlas.') from error
+MONGO_URI = os.getenv('MONGO_URI', '').strip()
+mongo_bd = os.environ.get('MONGO_BD', 'registro_alumnos').strip() or 'registro_alumnos'
+if not MONGO_URI:
+    raise RuntimeError('Falta MONGO_URI. Configurá la URI de MongoDB Atlas o de una instancia local.')
+if not MONGO_URI.startswith(('mongodb://', 'mongodb+srv://')):
+    raise RuntimeError('MONGO_URI debe comenzar con mongodb:// o mongodb+srv://.')
 
-    bd = cliente[mongo_bd]
-    repositorio = RepositorioEstudiantes(mongo_uri, mongo_bd)
-    usuarios, notas, inasistencias = bd['usuarios'], bd['notas'], bd['inasistencias']
-    usuarios.create_index('nombre_usuario', unique=True)
-    usuarios.create_index('email', unique=True)
-    notas.create_index('clave', unique=True)
-    inasistencias.create_index('clave', unique=True)
+try:
+    cliente = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    cliente.admin.command('ping')
+except InvalidURI:
+    raise RuntimeError(
+        'MONGO_URI no tiene un formato válido. Codificá para URL los caracteres especiales del usuario o la contraseña.'
+    ) from None
+except OperationFailure as error:
+    if error.code == 18 or (error.details and error.details.get('codeName') == 'AtlasError'):
+        raise RuntimeError(
+            'MongoDB rechazó la autenticación. Verificá en Atlas el usuario y la contraseña de Database Access; '
+            'codificá los caracteres especiales de la contraseña en MONGO_URI.'
+        ) from None
+    raise RuntimeError(
+        'MongoDB rechazó el comando de conexión. Verificá los permisos del usuario de base de datos.'
+    ) from None
+except PyMongoError as error:
+    raise RuntimeError(
+        'No se pudo conectar con MongoDB. Revisá MONGO_URI, DNS, Network Access de Atlas y disponibilidad del cluster.'
+    ) from None
+
+bd = cliente[mongo_bd]
+repositorio = RepositorioEstudiantes(MONGO_URI, mongo_bd)
+usuarios, notas, inasistencias = bd['usuarios'], bd['notas'], bd['inasistencias']
+usuarios.create_index('nombre_usuario', unique=True)
+usuarios.create_index('email', unique=True)
+notas.create_index('clave', unique=True)
+inasistencias.create_index('clave', unique=True)
 lista = ListaEstudiantes(repositorio)
 MATERIAS = ['Matemáticas', 'Lengua', 'Inglés', 'Química', 'Informática', 'Física', 'Historia']
 
@@ -46,40 +61,21 @@ def texto_seguro(valor):
     return html.escape((valor or '').strip(), quote=True)
 
 
-# Crear administrador inicial una sola vez. Cambiar estas variables antes de publicar.
 def buscar_usuario(nombre):
     nombre = texto_seguro(nombre)
-    if USAR_MEMORIA:
-        return next((u for u in usuarios.values() if u['nombre_usuario'].casefold() == nombre.casefold()), None)
     return usuarios.find_one({'nombre_usuario': nombre}) or usuarios.find_one({'nombre_usuario': {'$regex': '^' + re.escape(nombre) + '$', '$options': 'i'}})
 
 def guardar_usuario(doc):
-    if USAR_MEMORIA:
-        usuarios[doc['nombre_usuario'].lower()] = doc
-    else:
-        usuarios.insert_one(doc)
+    usuarios.insert_one(doc)
 
 def todos_de(coleccion, filtro=None):
-    if USAR_MEMORIA:
-        return [dict(v) for v in coleccion.values() if all(v.get(k) == val for k, val in (filtro or {}).items() )]
     return list(coleccion.find(filtro or {}, {'_id': 0}))
 
 def guardar_registro(coleccion, clave, doc):
-    if USAR_MEMORIA:
-        coleccion[doc[clave]] = dict(doc)
-    else:
-        coleccion.replace_one({clave: doc[clave]}, doc, upsert=True)
+    coleccion.replace_one({clave: doc[clave]}, doc, upsert=True)
 
 def borrar_registro(coleccion, clave, valor):
-    if USAR_MEMORIA:
-        return coleccion.pop(valor, None) is not None
     return coleccion.delete_one({clave: valor}).deleted_count > 0
-
-admin_name = os.environ.get('ADMIN_USER', 'admin')
-admin_password = os.environ.get('ADMIN_PASSWORD', 'Cambiar123!')
-if not buscar_usuario(admin_name):
-    guardar_usuario({'nombre_usuario': admin_name, 'nombre': 'Administrador', 'apellido': 'Sistema', 'email': 'admin@escuela.local', 'password_hash': generate_password_hash(admin_password), 'rol': 'admin'})
-
 
 def login_requerido(f):
     @wraps(f)
@@ -135,9 +131,7 @@ def registro():
             flash('Completá todos los campos. La contraseña debe tener al menos 8 caracteres.', 'error')
         elif buscar_usuario(nombre):
             flash('Ese nombre ya está registrado. Elegí otro nombre de usuario.', 'error')
-        elif not USAR_MEMORIA and usuarios.find_one({'email': email}):
-            flash('Ya existe una cuenta con ese email.', 'error')
-        elif USAR_MEMORIA and any(u['email'] == email for u in usuarios.values()):
+        elif usuarios.find_one({'email': email}):
             flash('Ya existe una cuenta con ese email.', 'error')
         else:
             guardar_usuario({'nombre_usuario': nombre, 'nombre': nombre.title(), 'apellido': apellido.title(), 'email': email, 'password_hash': generate_password_hash(password), 'rol': 'alumno'})
@@ -261,4 +255,4 @@ def eliminar(id):
     flash('Estudiante eliminado.' if lista.eliminar(id) else 'No se encontró el estudiante.', 'ok'); return redirect(url_for('listar'))
 
 if __name__ == '__main__':
-    app.run(debug=os.environ.get('FLASK_DEBUG') == '1')
+    app.run(host='0.0.0.0', port=5000, debug=os.environ.get('FLASK_DEBUG') == '1')
