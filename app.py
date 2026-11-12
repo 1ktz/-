@@ -123,19 +123,25 @@ def inicio():
 @app.route('/registro', methods=['GET', 'POST'])
 def registro():
     if request.method == 'POST':
-        nombre = texto_seguro(request.form.get('nombre'))
-        apellido = texto_seguro(request.form.get('apellido'))
+        nombre_usuario = texto_seguro(request.form.get('nombre_usuario'))
+        nombre_completo = texto_seguro(request.form.get('nombre_completo'))
         email = texto_seguro(request.form.get('email')).lower()
         password = request.form.get('password', '')
-        if len(nombre) < 2 or len(apellido) < 2 or '@' not in email or len(password) < 8:
+        if len(nombre_usuario) < 2 or len(nombre_completo) < 2 or '@' not in email or len(password) < 8:
             flash('Completá todos los campos. La contraseña debe tener al menos 8 caracteres.', 'error')
-        elif buscar_usuario(nombre):
-            flash('Ese nombre ya está registrado. Elegí otro nombre de usuario.', 'error')
+        elif buscar_usuario(nombre_usuario):
+            flash('Ese nombre de usuario ya está registrado. Elegí otro.', 'error')
         elif usuarios.find_one({'email': email}):
             flash('Ya existe una cuenta con ese email.', 'error')
         else:
-            guardar_usuario({'nombre_usuario': nombre, 'nombre': nombre.title(), 'apellido': apellido.title(), 'email': email, 'password_hash': generate_password_hash(password), 'rol': 'alumno'})
-            flash('Cuenta creada. Ahora podés iniciar sesión con tu nombre y contraseña.', 'ok')
+            guardar_usuario({
+                'nombre_usuario': nombre_usuario,
+                'nombre_completo': nombre_completo.title(),
+                'email': email,
+                'password_hash': generate_password_hash(password),
+                'rol': 'alumno',
+            })
+            flash('Cuenta creada. Ahora podés iniciar sesión con tu nombre de usuario y contraseña.', 'ok')
             return redirect(url_for('login'))
     return render_template('registro.html')
 
